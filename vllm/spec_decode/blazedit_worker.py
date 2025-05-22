@@ -19,6 +19,7 @@ from vllm.spec_decode.interfaces import (SpeculativeProposals,
                                          SpeculativeProposer)
 from vllm.spec_decode.proposer_worker_base import ProposerWorkerBase
 from vllm.spec_decode.top1_proposer import Top1Proposer
+from vllm.spec_decode.ngram_worker import NGramWorker
 from vllm.worker.worker_base import DelegateWorkerBase
 from vllm.worker.worker_base import MultiStepWorker
 
@@ -26,6 +27,14 @@ class BlazeditProposer(MultiStepWorker):
     """
     Proposer worker for Blazedit inference, based on multi_step_worker.py
     """
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.worker = NGramWorker(
+            self.worker.vllm_config,
+            local_rank=self.worker.local_rank,
+            device_type=self.worker.device_type
+        )
+
     @torch.inference_mode()
     def sampler_output(
         self,
@@ -55,11 +64,15 @@ class BlazeditProposer(MultiStepWorker):
         ) and self.model_runner.supports_gpu_multi_step(expanded_request):
             # Here we run the draft_model_runner with multi-step prepare
             # on the GPU directly
+            print("Running on GPU with multi-step prepare")
             expanded_request.num_steps = sample_len
             self.model_runner.set_indices_of_seq_with_bonus_tokens(
                 indices_of_seq_with_bonus_tokens)
+
             model_outputs = self.execute_model(
-                execute_model_req=expanded_request)
+                execute_model_req=execute_model_req,
+                sample_len=execute_model_req.num_blazedit_ngram_slots
+            )
         else:
             # Here we run multi-step directly, with every step prepared
             # on the CPU.
@@ -70,7 +83,9 @@ class BlazeditProposer(MultiStepWorker):
                 self.worker.model_runner.return_hidden_states = True
             for _ in range(sample_len):
                 model_output: List[SamplerOutput] = self.worker.execute_model(
-                    execute_model_req=expanded_request)
+                    execute_model_req=expanded_request,
+                    sample_len=execute_model_req.num_blazedit_ngram_slots
+                )
                 assert (len(model_output) == 1
                         ), "composing multistep workers not supported"
                 model_output = model_output[0]

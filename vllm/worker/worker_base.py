@@ -166,9 +166,10 @@ class DelegateWorkerBase(WorkerBase):
 
     def execute_model(
         self,
-        execute_model_req: Optional[ExecuteModelRequest] = None
+        execute_model_req: Optional[ExecuteModelRequest] = None,
+        **kwargs: Any
     ) -> Optional[List[SamplerOutput]]:
-        return self.worker.execute_model(execute_model_req)
+        return self.worker.execute_model(execute_model_req, **kwargs)
 
     def get_cache_block_size_bytes(self) -> int:
         return self.worker.get_cache_block_size_bytes()
