@@ -21,25 +21,28 @@ from vllm.spec_decode.proposer_worker_base import ProposerWorkerBase
 from vllm.spec_decode.top1_proposer import Top1Proposer
 from vllm.spec_decode.ngram_worker import NGramWorker
 from vllm.worker.worker_base import DelegateWorkerBase
-from vllm.worker.worker_base import MultiStepWorker
+from vllm.spec_decode.multi_step_worker import MultiStepWorker
+from vllm.spec_decode.spec_decode_worker import SpecDecodeWorker
+from vllm.model_executor.layers.rejection_sampler import RejectionSampler
 
-class BlazeditProposer(MultiStepWorker):
+class BlazeditWorker(MultiStepWorker):
     """
     Proposer worker for Blazedit inference, based on multi_step_worker.py
     """
     def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.worker = NGramWorker(
-            self.worker.vllm_config,
-            local_rank=self.worker.local_rank,
-            device_type=self.worker.device_type
+        super().__init__(*args, **kwargs)        
+
+    def wrap_worker(self, ngram_worker: NGramWorker):
+        self.worker = SpecDecodeWorker(
+            proposer_worker=ngram_worker,
+            scorer_worker=self.worker,
+            spec_decode_sampler=RejectionSampler(),
         )
 
     @torch.inference_mode()
     def sampler_output(
         self,
         execute_model_req: ExecuteModelRequest,
-        sample_len: int,
         seq_ids_with_bonus_token_in_last_step: Set[int]
     ) -> Tuple[List[SamplerOutput], bool]:
         """Run the model forward pass sample_len times. Returns the list of
@@ -57,50 +60,36 @@ class BlazeditProposer(MultiStepWorker):
             self._expand_execute_model_request(
                 execute_model_req, seq_ids_with_bonus_token_in_last_step)
 
+        expanded_request.num_lookahead_slots = execute_model_req.num_blazedit_ngram_slots
+
         # Run model sample_len times.
         model_outputs: List[SamplerOutput] = []
-        if current_platform.is_cuda_alike() and isinstance(
-                self.model_runner, TP1DraftModelRunner
-        ) and self.model_runner.supports_gpu_multi_step(expanded_request):
-            # Here we run the draft_model_runner with multi-step prepare
-            # on the GPU directly
-            print("Running on GPU with multi-step prepare")
-            expanded_request.num_steps = sample_len
-            self.model_runner.set_indices_of_seq_with_bonus_tokens(
-                indices_of_seq_with_bonus_tokens)
+        if expanded_request.previous_hidden_states is not None:
+            self.worker.model_runner.return_hidden_states = True
 
-            model_outputs = self.execute_model(
-                execute_model_req=execute_model_req,
-                sample_len=execute_model_req.num_blazedit_ngram_slots
+        for _ in range(execute_model_req.num_lookahead_slots):
+            # Execute the model with the n-gram worker.
+            model_output: List[SamplerOutput] = self.worker.execute_model(
+                execute_model_req=expanded_request,
             )
-        else:
-            # Here we run multi-step directly, with every step prepared
-            # on the CPU.
-            # TODO: Remove this branch once DraftModelRunner supports TP>1
-            # and other restrictions that are part of DraftModelRunner's
-            # supports_gpu_multi_step(..)
-            if expanded_request.previous_hidden_states is not None:
-                self.worker.model_runner.return_hidden_states = True
-            for _ in range(sample_len):
-                model_output: List[SamplerOutput] = self.worker.execute_model(
-                    execute_model_req=expanded_request,
-                    sample_len=execute_model_req.num_blazedit_ngram_slots
-                )
-                assert (len(model_output) == 1
-                        ), "composing multistep workers not supported"
-                model_output = model_output[0]
-                print("Model output: ", model_output)
+            assert (len(model_output) == 1
+                    ), "composing multistep workers not supported"
+            model_output = model_output[0]
+            print("Model output: ", model_output)
 
-                self._maybe_update_previous_hidden_states(
-                    model_output, expanded_request)
-                self._append_new_tokens(
-                    model_output, expanded_request.seq_group_metadata_list,
-                    indices_of_seq_with_bonus_tokens)
-                model_outputs.append(model_output)
+            self._maybe_update_previous_hidden_states(
+                model_output, expanded_request)
+            self._append_new_tokens(
+                model_output, expanded_request.seq_group_metadata_list,
+                indices_of_seq_with_bonus_tokens)
+            model_outputs.append(model_output)
 
         # move indices to device to avoid stream sync
         indices_of_seq_with_bonus_tokens = torch.tensor(
             indices_of_seq_with_bonus_tokens, device=self.device)
         filtered_model_outputs = self._filter_model_output(
             model_outputs, indices_of_seq_with_bonus_tokens)
+
+        print("Model outputs after filtering: ", filtered_model_outputs)
+
         return filtered_model_outputs, True
