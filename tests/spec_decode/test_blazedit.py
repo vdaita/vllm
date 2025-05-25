@@ -43,15 +43,6 @@ def test_multi_step_with_batch_expansion_correct_output():
     block_size = 16
     num_gpu_blocks = 2048 // block_size
     batch_size = 128
-    multi_step_worker = create_worker(
-        BlazeditWorker,
-        model_name,
-        block_size,
-        num_gpu_blocks,
-        seed,
-        model_runner_cls=TP1DraftModelRunner,
-    )
-    multi_step_worker.set_include_gpu_probs_tensor()
 
     ngram_worker = create_worker(
         NGramWorker,
@@ -60,6 +51,21 @@ def test_multi_step_with_batch_expansion_correct_output():
         num_gpu_blocks,
         seed,
     )
+    ngram_worker.set_ngram_window_size(1, 3)
+
+    multi_step_worker = create_worker(
+        BlazeditWorker,
+        model_name,
+        block_size,
+        num_gpu_blocks,
+        seed,
+        model_runner_cls=TP1DraftModelRunner,
+        model_kwargs={
+            "ngram_worker": ngram_worker,
+            "num_ngram_steps": 2
+        }
+    )
+    multi_step_worker.set_include_gpu_probs_tensor()
 
     worker = create_worker(
         Worker,
@@ -128,10 +134,8 @@ def test_multi_step_with_batch_expansion_correct_output():
 
     # Run multi-step and verify that the third token prediction is accurate
     # for all sequences.
-    zero_kv_cache(multi_step_worker.cache_engine)
+    zero_kv_cache(multi_step_worker.worker.scorer_worker.cache_engine)
 
-    # NOTE: have to wrap the worker after zero-ing out the KV cache
-    multi_step_worker.wrap_worker(ngram_worker)
 
     all_seq_ids = {i for i in range(batch_size)}
     multi_step_output, _ = multi_step_worker.sampler_output(

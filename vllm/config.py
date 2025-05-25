@@ -1927,6 +1927,11 @@ class SpeculativeConfig:
                 - medusa
                 - mlp_speculator
                 - draft_model
+                - blazedit
+                    Related additional configuration:
+                    - num_blazedit_ngram_speculative_tokens (int):
+                        The number of speculative tokens to use for the
+                        ngram proposer in BlazEdit.
         - acceptance_method (str): The method to use for accepting draft
             tokens. This can take two possible values: 'rejection_sampler' and
             'typical_acceptance_sampler' for RejectionSampler and
@@ -2000,6 +2005,7 @@ class SpeculativeConfig:
     # speculative configs from cli args
     num_speculative_tokens: int = field(default=None,
                                         init=True)  # type: ignore
+
     method: Optional[str] = None
     acceptance_method: str = "rejection_sampler"
     draft_tensor_parallel_size: Optional[int] = None
@@ -2015,6 +2021,7 @@ class SpeculativeConfig:
     disable_by_batch_size: Optional[int] = None
     prompt_lookup_max: Optional[int] = None
     prompt_lookup_min: Optional[int] = None
+    num_blazedit_ngram_speculative_tokens: Optional[int] = None
     posterior_threshold: Optional[float] = None
     posterior_alpha: Optional[float] = None
 

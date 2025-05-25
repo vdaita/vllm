@@ -70,7 +70,8 @@ def create_worker(cls: Callable[..., T],
                   is_driver_worker: bool = True,
                   enforce_eager: bool = True,
                   model_runner_cls: Optional[ModelRunner] = None,
-                  dtype: Optional[str] = "auto") -> T:
+                  dtype: Optional[str] = "auto",
+                  model_kwargs: Optional[dict] = {}) -> T:
     engine_args = EngineArgs(
         model=model_name,
         seed=seed,
@@ -90,6 +91,7 @@ def create_worker(cls: Callable[..., T],
         distributed_init_method=distributed_init_method,
         is_driver_worker=is_driver_worker,
         model_runner_cls=model_runner_cls,
+        **model_kwargs
     )
 
     worker.init_device()

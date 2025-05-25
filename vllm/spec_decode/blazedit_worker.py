@@ -30,14 +30,19 @@ class BlazeditWorker(MultiStepWorker):
     Proposer worker for Blazedit inference, based on multi_step_worker.py
     """
     def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)        
+        if "ngram_worker" in kwargs and "num_ngram_steps" in kwargs:
+            ngram_worker = kwargs.pop("ngram_worker")
+            num_ngram_steps = kwargs.pop("num_ngram_steps")
+            spec_decode_worker = SpecDecodeWorker(
+                proposer_worker=ngram_worker,
+                scorer_worker=copy.deepcopy(self.worker),
+                spec_decode_sampler=RejectionSampler()
+            )
 
-    def wrap_worker(self, ngram_worker: NGramWorker):
-        self.worker = SpecDecodeWorker(
-            proposer_worker=ngram_worker,
-            scorer_worker=self.worker,
-            spec_decode_sampler=RejectionSampler(),
-        )
+            self.worker = spec_decode_worker
+            self.num_ngram_steps = num_ngram_steps # move this before the normal initialization
+
+        super().__init__(*args, **kwargs)
 
     @torch.inference_mode()
     def sampler_output(
@@ -59,9 +64,7 @@ class BlazeditWorker(MultiStepWorker):
         expanded_request, indices_of_seq_with_bonus_tokens =\
             self._expand_execute_model_request(
                 execute_model_req, seq_ids_with_bonus_token_in_last_step)
-
-        expanded_request.num_lookahead_slots = execute_model_req.num_blazedit_ngram_slots
-
+        expanded_request.num_lookahead_slots = self.num_ngram_steps
         # Run model sample_len times.
         model_outputs: List[SamplerOutput] = []
         if expanded_request.previous_hidden_states is not None:
@@ -70,10 +73,8 @@ class BlazeditWorker(MultiStepWorker):
         for _ in range(execute_model_req.num_lookahead_slots):
             # Execute the model with the n-gram worker.
             model_output: List[SamplerOutput] = self.worker.execute_model(
-                execute_model_req=expanded_request,
+                execute_model_req=expanded_request
             )
-            assert (len(model_output) == 1
-                    ), "composing multistep workers not supported"
             model_output = model_output[0]
             print("Model output: ", model_output)
 

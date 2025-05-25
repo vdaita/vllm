@@ -94,6 +94,7 @@ def create_spec_worker(*args, **kwargs) -> "SpecDecodeWorker":
         vllm_config=draft_worker_config,
         ngram_prompt_lookup_max=speculative_config.prompt_lookup_max,
         ngram_prompt_lookup_min=speculative_config.prompt_lookup_min,
+        num_blazedit_ngram_speculative_tokens=speculative_config.num_blazedit_ngram_speculative_tokens
     )
 
     spec_decode_worker = SpecDecodeWorker.create_worker(
@@ -164,6 +165,10 @@ class SpecDecodeWorker(LoRANotSupportedWorkerBase):
             draft_worker_kwargs.pop("ngram_prompt_lookup_max"))
         ngram_prompt_lookup_min = (
             draft_worker_kwargs.pop("ngram_prompt_lookup_min"))
+        num_blazedit_ngram_speculative_tokens = (
+            draft_worker_kwargs.pop("num_blazedit_ngram_speculative_tokens")
+        )
+        
         draft_model_config = draft_worker_kwargs["vllm_config"].model_config
         draft_parallel_config: ParallelConfig = draft_worker_kwargs[
             'vllm_config'].parallel_config
@@ -173,6 +178,10 @@ class SpecDecodeWorker(LoRANotSupportedWorkerBase):
             proposer_worker = NGramWorker(**draft_worker_kwargs)
             proposer_worker.set_ngram_window_size(ngram_prompt_lookup_min,
                                                   ngram_prompt_lookup_max)
+        elif num_blazedit_ngram_speculative_tokens > 0:
+            from vllm.spec_decode.blazedit_worker import BlazeditWorker # to avoid a circular import
+            draft_worker_kwargs["device_type"] = scorer_worker.device_config.device.type
+            proposer_worker = BlazeditWorker(**draft_worker_kwargs)
         else:
             draft_tp = draft_parallel_config.tensor_parallel_size
             target_tp = scorer_worker.parallel_config.tensor_parallel_size

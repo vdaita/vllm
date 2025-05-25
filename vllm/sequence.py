@@ -1315,8 +1315,6 @@ class ExecuteModelRequest(
     virtual_engine: int = 0
     # The number of slots for lookahead decoding.
     num_lookahead_slots: int = 0
-    # The number of slots for two-layer decoding with n-grams and lookahead
-    num_blazedit_ngram_slots: int = 0
     # The number of requests in the running queue.
     running_queue_size: int = 0
     # Optional hidden states from prior step.
