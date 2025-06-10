@@ -38,6 +38,7 @@ class NGramWorker(NonLLMProposerWorkerBase):
         # Get local_rank/vocab_size from kwargs attribute
         self.local_rank = local_rank
         self.device_type = device_type
+        self.hard_coded_sample_len = -1
 
         # Lazy initialization list.
         self._proposer: Top1Proposer
@@ -48,6 +49,9 @@ class NGramWorker(NonLLMProposerWorkerBase):
         # ngram_prompt_lookup_min/ngram_prompt_lookup_max
         self.ngram_prompt_lookup_max = ngram_prompt_lookup_max
         self.ngram_prompt_lookup_min = ngram_prompt_lookup_min
+
+    def set_hard_coded_sample_len(self, sample_len: int):
+        self.hard_coded_sample_len = sample_len
 
     def init_device(self):
         self.device = torch.device(f"{self.device_type}:{self.local_rank}")
@@ -80,6 +84,9 @@ class NGramWorker(NonLLMProposerWorkerBase):
         indicator pass to sampler_output_to_torch shall be False.
         """
         self._raise_if_unsupported(execute_model_req)
+
+        if self.hard_coded_sample_len > 0:
+            sample_len = self.hard_coded_sample_len
 
         has_spec_out = False
         token_id_list: List[Optional[torch.Tensor]] = []

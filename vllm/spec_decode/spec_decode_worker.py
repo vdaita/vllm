@@ -179,9 +179,35 @@ class SpecDecodeWorker(LoRANotSupportedWorkerBase):
             proposer_worker.set_ngram_window_size(ngram_prompt_lookup_min,
                                                   ngram_prompt_lookup_max)
         elif num_blazedit_ngram_speculative_tokens > 0:
-            from vllm.spec_decode.blazedit_worker import BlazeditWorker # to avoid a circular import
-            draft_worker_kwargs["device_type"] = scorer_worker.device_config.device.type
-            proposer_worker = BlazeditWorker(**draft_worker_kwargs)
+            ngram_proposer_config = copy.deepcopy(draft_worker_kwargs)
+            ngram_proposer_config["ngram_prompt_lookup_max"] = ngram_prompt_lookup_max
+            ngram_proposer_config["ngram_prompt_lookup_min"] = ngram_prompt_lookup_min
+            ngram_proposer_worker = NGramWorker(**ngram_proposer_config)
+            ngram_proposer_worker.set_ngram_window_size(ngram_prompt_lookup_min, ngram_prompt_lookup_max)
+            ngram_proposer_worker.set_hard_coded_sample_len(num_blazedit_ngram_speculative_tokens)
+
+            scorer_config_kwargs = copy.deepcopy(draft_worker_kwargs)
+
+            draft_tp = draft_parallel_config.tensor_parallel_size
+            if draft_tp == 1:
+                if current_platform.is_cuda_alike():
+                    scorer_config_kwargs["model_runner_cls"] = TP1DraftModelRunner
+            else:
+                if draft_model_config.hf_config.model_type == "eagle":
+                    raise NotImplementedError(
+                        f"{draft_model_config.hf_config.model_type} "
+                        "does not support TP > 1 yet")
+                allow_zero_draft_token_step = False
+            
+            multi_step_scorer = MultiStepWorker(
+                **scorer_config_kwargs
+            )
+            
+            # not an mlp speculator
+            proposer_worker = SpecDecodeWorker(
+                proposer_worker=ngram_proposer_worker,
+                scorer_worker=multi_step_scorer
+            )
         else:
             draft_tp = draft_parallel_config.tensor_parallel_size
             target_tp = scorer_worker.parallel_config.tensor_parallel_size
